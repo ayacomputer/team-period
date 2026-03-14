@@ -1,0 +1,60 @@
+# ───────────────── OS / System ────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+
+# ───────────────── Editor / IDE ───────────────────────────
+.idea/
+.vscode/
+*.swp
+*.swo
+
+
+# ───────────────── Environment & Secrets ───────────────────
+.env
+.env.*
+!.env.example
+firebase.env.json
+
+
+# ───────────────── Android ────────────────────────────────
+android/.gradle/
+android/local.properties
+android/key.properties
+android/app/build/
+*.jks
+*.keystore
+
+
+# ───────────────── iOS ────────────────────────────────────
+ios/Pods/
+ios/build/
+ios/.symlinks/
+**/*.xcworkspace/xcuserdata/
+**/DerivedData/
+GoogleService-Info.plist
+
+
+# ───────────────── Flutter / Dart ─────────────────────────
+
+# Dart tooling
+.dart_tool/
+.packages
+
+# Flutter plugin lockfiles (auto-generated)
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Build outputs
+build/
+
+# Code generation
+*.g.dart
+*.freezed.dart
+
+# Coverage
+coverage/
+
+# FVM Version Cache
+.fvm/

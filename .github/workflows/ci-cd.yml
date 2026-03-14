@@ -1,0 +1,41 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  CI/CD — __APP_NAME__
+#
+#  PIPELINES:
+#    Pull request  →  flutter analyze + flutter test
+#    git tag v*    →  signed Android AAB + iOS IPA uploaded as release artifacts
+#
+#  REQUIRED GitHub Secrets  (repo Settings → Secrets and variables → Actions):
+#    APPLE_TEAM_ID              10-character Apple Developer Team ID
+#    ANDROID_KEYSTORE_BASE64    base64-encoded release keystore (.jks)
+#    ANDROID_KEYSTORE_ALIAS     alias used when generating keystore
+#    ANDROID_KEYSTORE_PASSWORD  keystore password
+#    ANDROID_KEY_PASSWORD       key password
+#
+#  Powered by: github.com/ayacomputer/mobile-cicd
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI/CD
+
+on:
+  push:
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  release:
+    uses: ayacomputer/mobile-cicd/.github/workflows/release-flutter.yml@main
+    with:
+      app-name: __APP_NAME__
+      export-options-plist: .github/ios/ExportOptions.plist
+    secrets:
+      apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
+      keystore-base64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      keystore-alias: ${{ secrets.ANDROID_KEYSTORE_ALIAS }}
+      keystore-password: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      key-password: ${{ secrets.ANDROID_KEY_PASSWORD }}

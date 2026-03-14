@@ -1,0 +1,6 @@
+# Prevent Windows from changing Unix file permissions
+* text=auto
+
+*.sh text eol=lf
+*.env text eol=lf
+ios/ci_scripts/* text eol=lf

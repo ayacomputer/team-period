@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Set to true and declare NSPrivacyTrackingDomains if your app uses IDFA
+         or links user data across apps/sites for advertising. Most apps leave
+         this false. -->
+    <key>NSPrivacyTracking</key>
+    <false/>
+
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+
+    <!-- Declare any data types your app collects. See:
+         https://developer.apple.com/documentation/bundleresources/privacy_manifest_files/describing_data_use_in_privacy_manifests -->
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+
+    <!-- Declare any required-reason APIs your app uses (e.g. file timestamps,
+         system boot time). See:
+         https://developer.apple.com/documentation/bundleresources/privacy_manifest_files/describing_use_of_required_reason_api -->
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array/>
+</dict>
+</plist>
