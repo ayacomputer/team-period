@@ -173,16 +173,16 @@ case "$COMMAND" in
     curl -fsSL https://raw.githubusercontent.com/ayacomputer/mobile-cicd/main/scripts/setup-workflow.sh | bash
     ;;
 
-  dev)           flutter run ;;
+  dev)           flutter run --dart-define-from-file=firebase.env.json ;;
   test)          flutter test ;;
-  test:ios)      require_macos; flutter run -d ios ;;
-  test:android)  flutter run -d android ;;
-  build:android) flutter build appbundle ;;
+  test:ios)      require_macos; flutter run -d ios --dart-define-from-file=firebase.env.json ;;
+  test:android)  flutter run -d android --dart-define-from-file=firebase.env.json ;;
+  build:android) flutter build appbundle --dart-define-from-file=firebase.env.json ;;
 
   build:ios)
     require_macos; require_apple_team_id
     PLIST="$(make_export_options)"; trap 'rm -f "$PLIST"' EXIT
-    flutter build ipa --release --export-options-plist="$PLIST"
+    flutter build ipa --release --dart-define-from-file=firebase.env.json --export-options-plist="$PLIST"
     ;;
 
   build-deploy:android)
