@@ -175,7 +175,28 @@ case "$COMMAND" in
 
   dev)           flutter run --dart-define-from-file=firebase.env.json ;;
   test)          flutter test ;;
-  test:ios)      require_macos; flutter run -d ios --dart-define-from-file=firebase.env.json ;;
+  test:ios)
+    require_macos
+    # `-d ios` only matches physical devices; pick the booted simulator by ID instead.
+    IOS_SIM_ID="$(xcrun simctl list devices booted -j \
+      | python3 -c "import sys,json; d=json.load(sys.stdin)['devices']; \
+          ids=[dev['udid'] for devs in d.values() for dev in devs if dev.get('state')=='Booted' and 'iPhone' in dev.get('name','')]; \
+          print(ids[0] if ids else '')")"
+    if [[ -z "$IOS_SIM_ID" ]]; then
+      # No booted simulator — boot the first available iPhone sim
+      IOS_SIM_ID="$(xcrun simctl list devices available -j \
+        | python3 -c "import sys,json; d=json.load(sys.stdin)['devices']; \
+            ids=[dev['udid'] for devs in d.values() for dev in devs if 'iPhone' in dev.get('name','')]; \
+            print(ids[0] if ids else '')")"
+      [[ -z "$IOS_SIM_ID" ]] && { echo "Error: No iOS simulator found."; exit 1; }
+      echo "Booting simulator $IOS_SIM_ID..."
+      xcrun simctl boot "$IOS_SIM_ID"
+      open -a Simulator
+      sleep 3
+    fi
+    echo "Using simulator: $IOS_SIM_ID"
+    flutter run -d "$IOS_SIM_ID" --dart-define-from-file=firebase.env.json
+    ;;
   test:android)  flutter run -d android --dart-define-from-file=firebase.env.json ;;
   build:android) flutter build appbundle --dart-define-from-file=firebase.env.json ;;
 
