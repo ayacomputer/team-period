@@ -165,6 +165,11 @@ function Find-AndroidStudio {
     return if ($match) { $match.FullName } else { $null }
 }
 
+function Invoke-FlutterClean {
+    Write-Host "Cleaning Flutter build cache..." -ForegroundColor Cyan
+    flutter clean
+}
+
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 switch ($Command) {
@@ -180,10 +185,12 @@ switch ($Command) {
     }
 
     "dev" {
+        Invoke-FlutterClean
         flutter run
     }
 
     "test" {
+        Invoke-FlutterClean
         flutter test
     }
 
@@ -193,10 +200,12 @@ switch ($Command) {
     }
 
     "test:android" {
+        Invoke-FlutterClean
         flutter run -d android
     }
 
     "build:android" {
+        Invoke-FlutterClean
         flutter build appbundle
     }
 
@@ -211,6 +220,7 @@ switch ($Command) {
     }
 
     "build-deploy:android" {
+        Invoke-FlutterClean
         flutter build appbundle
 
         $studioExe = Find-AndroidStudio

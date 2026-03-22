@@ -163,6 +163,23 @@ poll_build_run() {
 
 # ── Commands ──────────────────────────────────────────────────────────────────
 
+# Clears Flutter build outputs — safe to call for any platform/command.
+flutter_clean() {
+  echo "Cleaning Flutter build cache..."
+  flutter clean
+}
+
+# Clears Flutter build outputs + global Xcode caches.
+# Only call this before iOS builds; it is a global operation that affects
+# all Xcode projects on the machine and takes time to rebuild.
+ios_clean() {
+  flutter_clean
+  echo "Clearing Xcode DerivedData and caches..."
+  rm -rf ~/Library/Developer/Xcode/DerivedData &
+  rm -rf ~/Library/Caches/com.apple.dt.Xcode &
+  wait
+}
+
 case "$COMMAND" in
 
   setup)
@@ -173,8 +190,14 @@ case "$COMMAND" in
     curl -fsSL https://raw.githubusercontent.com/ayacomputer/mobile-cicd/main/scripts/setup-workflow.sh | bash
     ;;
 
-  dev)           flutter run --dart-define-from-file=firebase.env.json ;;
-  test)          flutter test ;;
+  dev)
+    flutter_clean
+    flutter run --dart-define-from-file=firebase.env.json
+    ;;
+  test)
+    flutter_clean
+    flutter test
+    ;;
   test:ios)
     require_macos
     # `-d ios` only matches physical devices; pick the booted simulator by ID instead.
@@ -195,24 +218,34 @@ case "$COMMAND" in
       sleep 3
     fi
     echo "Using simulator: $IOS_SIM_ID"
+    ios_clean
     flutter run -d "$IOS_SIM_ID" --dart-define-from-file=firebase.env.json
     ;;
-  test:android)  flutter run -d android --dart-define-from-file=firebase.env.json ;;
-  build:android) flutter build appbundle --dart-define-from-file=firebase.env.json ;;
+  test:android)
+    flutter_clean
+    flutter run -d android --dart-define-from-file=firebase.env.json
+    ;;
+  build:android)
+    flutter_clean
+    flutter build appbundle --dart-define-from-file=firebase.env.json
+    ;;
 
   build:ios)
     require_macos; require_apple_team_id
+    ios_clean
     PLIST="$(make_export_options)"; trap 'rm -f "$PLIST"' EXIT
     flutter build ipa --release --dart-define-from-file=firebase.env.json --export-options-plist="$PLIST"
     ;;
 
   build-deploy:android)
+    flutter_clean
     flutter build appbundle
     echo "AAB built. Submit via Android Studio on Windows."
     ;;
 
   build-deploy:ios)
     require_macos; require_apple_team_id; require_xcode_cloud_creds
+    ios_clean
     PLIST="$(make_export_options)"; trap 'rm -f "$PLIST"' EXIT
     VERSION_LINE=$(grep '^version:' pubspec.yaml | tr -d ' ')
     BUILD_NAME="${VERSION_LINE#version:}"; BUILD_NAME="${BUILD_NAME%+*}"
