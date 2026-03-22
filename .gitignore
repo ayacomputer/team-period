@@ -23,6 +23,7 @@ android/.gradle/
 android/local.properties
 android/key.properties
 android/app/build/
+android/app/google-services.json
 *.jks
 *.keystore
 
