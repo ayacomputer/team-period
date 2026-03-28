@@ -299,7 +299,7 @@ class _MainShellState extends State<MainShell> {
             onSaveSleep: _saveSleep,
             onWaterIntakeChanged: _saveWaterIntake,
           ),
-          CalendarScreen(logs: _logs, settings: _settings),
+          CalendarScreen(logs: _logs, settings: _settings, sleep: _sleep),
           TemperatureScreen(
             temperatures: _temperatures,
             logs: _logs,

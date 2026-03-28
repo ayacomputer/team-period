@@ -2,7 +2,10 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 import '../models/cycle_settings.dart';
+import '../models/flow_entry.dart';
+import '../models/mood_entry.dart';
 import '../models/period_log.dart';
+import '../models/sleep_entry.dart';
 import '../utils/cycle_calculations.dart';
 
 /// Full-month calendar showing actual and predicted cycle phases.
@@ -11,10 +14,12 @@ class CalendarScreen extends StatefulWidget {
     super.key,
     required this.logs,
     required this.settings,
+    required this.sleep,
   });
 
   final List<PeriodLog> logs;
   final CycleSettings settings;
+  final List<SleepEntry> sleep;
 
   @override
   State<CalendarScreen> createState() => _CalendarScreenState();
@@ -86,6 +91,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
               roleMap: roleMap,
               today: today,
               logs: widget.logs,
+              sleep: widget.sleep,
               t: t,
             ),
           ),
@@ -186,6 +192,7 @@ class _MonthGrid extends StatelessWidget {
     required this.roleMap,
     required this.today,
     required this.logs,
+    required this.sleep,
     required this.t,
   });
 
@@ -194,6 +201,7 @@ class _MonthGrid extends StatelessWidget {
   final Map<DateTime, DayRole> roleMap;
   final DateTime today;
   final List<PeriodLog> logs;
+  final List<SleepEntry> sleep;
   final AppLocalizations t;
 
   @override
@@ -205,7 +213,7 @@ class _MonthGrid extends StatelessWidget {
         childAspectRatio: 0.9,
       ),
       itemCount: calDays.length,
-      itemBuilder: (context, i) {
+      itemBuilder: (_, i) {
         final day = calDays[i];
         final role = roleMap[day] ?? DayRole.none;
         final isCurrentMonth = day.month == focusedMonth.month;
@@ -216,6 +224,8 @@ class _MonthGrid extends StatelessWidget {
           role: role,
           isCurrentMonth: isCurrentMonth,
           isToday: isToday,
+          // Use the outer build context so the bottom sheet inherits the
+          // correct Localizations and Navigator.
           onTap: () => _showDayDetail(context, day, role),
         );
       },
@@ -225,10 +235,17 @@ class _MonthGrid extends StatelessWidget {
   void _showDayDetail(BuildContext context, DateTime day, DayRole role) {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (_) => _DayDetailSheet(day: day, role: role, logs: logs, t: t),
+      builder: (_) => _DayDetailSheet(
+        day: day,
+        role: role,
+        logs: logs,
+        sleep: sleep,
+        t: t,
+      ),
     );
   }
 }
@@ -406,13 +423,18 @@ class _DayDetailSheet extends StatelessWidget {
     required this.day,
     required this.role,
     required this.logs,
+    required this.sleep,
     required this.t,
   });
 
   final DateTime day;
   final DayRole role;
   final List<PeriodLog> logs;
+  final List<SleepEntry> sleep;
   final AppLocalizations t;
+
+  String get _dayIso =>
+      '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
@@ -420,76 +442,133 @@ class _DayDetailSheet extends StatelessWidget {
     final roleLabel = _roleLabel();
     final roleColor = _roleColor();
 
-    // Find any mood entries for this day
-    final dayIso =
-        '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
     final moods = logs
         .expand((l) => l.moods)
-        .where((m) => m.date == dayIso)
+        .where((m) => m.date == _dayIso)
         .toList();
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Handle
-          Center(
-            child: Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(100),
-              ),
-            ),
-          ),
+    final flows = logs
+        .expand((l) => l.flows)
+        .where((f) => f.date == _dayIso)
+        .toList();
 
-          // Date
-          Text(
-            '${day.day} $monthName ${day.year}',
-            style: const TextStyle(
-                fontSize: 18, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
+    final sleepEntry = sleep.where((s) => s.date == _dayIso).firstOrNull;
 
-          // Role chip
-          if (role != DayRole.none)
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: roleColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(100),
-              ),
-              child: Text(
-                roleLabel,
-                style: TextStyle(
-                  color: roleColor,
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
+    final hasData =
+        role != DayRole.none || moods.isNotEmpty || flows.isNotEmpty || sleepEntry != null;
+
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Drag handle
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(100),
                 ),
               ),
-            )
-          else
-            Text(t.noDayInfo,
-                style: TextStyle(color: Colors.grey.shade500)),
-
-          // Mood entries
-          if (moods.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            const Divider(),
-            const SizedBox(height: 8),
-            ...moods.map(
-              (m) => Text(
-                '${m.mood.name.toUpperCase()}  •  ${m.conditions.join(', ')}',
-                style: const TextStyle(fontSize: 13),
-              ),
             ),
+
+            // Date heading
+            Text(
+              '${day.day} $monthName ${day.year}',
+              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+
+            // Cycle phase chip
+            if (role != DayRole.none)
+              _PhaseChip(label: roleLabel, color: roleColor)
+            else if (!hasData)
+              Text(t.noDayInfo, style: TextStyle(color: Colors.grey.shade500)),
+
+            // ── Flow ──────────────────────────────────────────────────────
+            if (flows.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const _SectionLabel(text: 'Flow'),
+              const SizedBox(height: 6),
+              ...flows.map((f) => _DetailRow(
+                    leading: f.intensity.emoji,
+                    label: f.intensity.label,
+                  )),
+            ],
+
+            // ── Mood ──────────────────────────────────────────────────────
+            if (moods.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const _SectionLabel(text: 'Mood'),
+              const SizedBox(height: 6),
+              ...moods.map((m) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _DetailRow(
+                        leading: _moodEmoji(m.mood),
+                        label: _moodLabel(m.mood),
+                      ),
+                      if (m.conditions.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 28, top: 4),
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: m.conditions
+                                .map((c) => _SmallChip(label: c))
+                                .toList(),
+                          ),
+                        ),
+                      if (m.note != null && m.note!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 28, top: 4),
+                          child: Text(
+                            m.note!,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ),
+                    ],
+                  )),
+            ],
+
+            // ── Sleep ─────────────────────────────────────────────────────
+            if (sleepEntry != null) ...[
+              const SizedBox(height: 16),
+              const _SectionLabel(text: 'Sleep'),
+              const SizedBox(height: 6),
+              _DetailRow(
+                leading: _sleepEmoji(sleepEntry.quality),
+                label: _sleepQualityLabel(sleepEntry.quality) +
+                    (sleepEntry.hoursSlept != null
+                        ? '  ·  ${sleepEntry.hoursSlept}h'
+                        : ''),
+              ),
+              if (sleepEntry.note != null && sleepEntry.note!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 28, top: 4),
+                  child: Text(
+                    sleepEntry.note!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey.shade600,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+            ],
+
+            const SizedBox(height: 8),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -523,6 +602,128 @@ class _DayDetailSheet extends StatelessWidget {
       case DayRole.none:
         return Colors.grey;
     }
+  }
+
+  String _moodEmoji(Mood mood) {
+    return switch (mood) {
+      Mood.great => '😁',
+      Mood.good => '🙂',
+      Mood.okay => '😐',
+      Mood.low => '😟',
+      Mood.rough => '😢',
+    };
+  }
+
+  String _moodLabel(Mood mood) {
+    return switch (mood) {
+      Mood.great => 'Great',
+      Mood.good => 'Good',
+      Mood.okay => 'Okay',
+      Mood.low => 'Low',
+      Mood.rough => 'Rough',
+    };
+  }
+
+  String _sleepEmoji(int quality) {
+    return switch (quality) {
+      5 => '😴',
+      4 => '🌙',
+      3 => '💤',
+      2 => '😪',
+      _ => '😩',
+    };
+  }
+
+  String _sleepQualityLabel(int quality) {
+    return switch (quality) {
+      5 => 'Excellent',
+      4 => 'Good',
+      3 => 'Fair',
+      2 => 'Poor',
+      _ => 'Very poor',
+    };
+  }
+}
+
+// ── Day detail sub-widgets ────────────────────────────────────────────────────
+
+class _PhaseChip extends StatelessWidget {
+  const _PhaseChip({required this.label, required this.color});
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(100),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: color,
+          fontWeight: FontWeight.w600,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: Color(0xFF6B7280),
+        letterSpacing: 0.4,
+      ),
+    );
+  }
+}
+
+class _DetailRow extends StatelessWidget {
+  const _DetailRow({required this.leading, required this.label});
+  final String leading;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          SizedBox(width: 24, child: Text(leading, style: const TextStyle(fontSize: 15))),
+          const SizedBox(width: 4),
+          Text(label, style: const TextStyle(fontSize: 14)),
+        ],
+      ),
+    );
+  }
+}
+
+class _SmallChip extends StatelessWidget {
+  const _SmallChip({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(100),
+      ),
+      child: Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF374151))),
+    );
   }
 }
 

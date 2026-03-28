@@ -234,55 +234,48 @@ Map<DateTime, DayRole> buildDayRoleMap({
   final avgPeriod =
       computeAveragePeriodLength(logs) ?? settings.averagePeriodLength;
 
-  // Months that have at least one actual log — suppress predictions here.
-  final coveredMonths = <String>{};
-  for (final log in logs) {
-    final s = fromIsoDate(log.startDate);
-    coveredMonths.add('${s.year}-${s.month}');
-    if (log.endDate != null) {
-      final e = fromIsoDate(log.endDate!);
-      coveredMonths.add('${e.year}-${e.month}');
-    }
-  }
-
+  // Start from the most-recent log's start date and project forward one
+  // cycle at a time.  We begin one cycle *before* monthStart so that
+  // fertile/ovulation windows whose period anchor is just before the view
+  // still get drawn inside the visible month.
   final sorted = [...logs]
     ..sort((a, b) => b.startDate.compareTo(a.startDate));
   var projected = fromIsoDate(sorted.first.startDate);
 
-  // Advance until projected start is after today (first future cycle).
-  while (!projected.isAfter(today)) {
+  // Walk forward until the projected start is close enough to monthStart
+  // that its fertile/ovulation tail could overlap with the visible month.
+  // "Close enough" = within one full cycle before monthStart.
+  while (projected.add(Duration(days: avgCycle)).isBefore(monthStart)) {
     projected = projected.add(Duration(days: avgCycle));
   }
 
-  // Project forward until we've passed monthEnd.
+  // Paint predictions for every projected cycle that overlaps the month.
+  // Actual data already occupies those keys (Step 1), so setIfEmpty
+  // guarantees real logs always win — no extra suppression needed.
   while (!projected.isAfter(monthEnd)) {
-    final periodEnd =
-        projected.add(Duration(days: avgPeriod - 1));
+    final periodEnd = projected.add(Duration(days: avgPeriod - 1));
     final ovulation = projected.add(Duration(days: avgCycle - 14));
     final fertileStart = ovulation.subtract(const Duration(days: 5));
     final fertileEnd = ovulation.add(const Duration(days: 1));
 
-    // Only draw predictions in months with no real data.
-    bool isCovered(DateTime d) =>
-        coveredMonths.contains('${d.year}-${d.month}');
-
-    // Period window
-    for (var d = projected;
-        !d.isAfter(periodEnd);
-        d = d.add(const Duration(days: 1))) {
-      if (!isCovered(d)) setIfEmpty(d, DayRole.predictedPeriod);
+    // Only paint predictions for days that are today or in the future.
+    // Past predictions are noise and conflict with "no data logged" months.
+    if (!periodEnd.isBefore(today)) {
+      for (var d = projected;
+          !d.isAfter(periodEnd);
+          d = d.add(const Duration(days: 1))) {
+        if (!d.isBefore(today)) setIfEmpty(d, DayRole.predictedPeriod);
+      }
     }
 
-    // Ovulation day
-    if (!isCovered(ovulation)) {
+    if (!ovulation.isBefore(today)) {
       setIfEmpty(ovulation, DayRole.predictedOvulation);
     }
 
-    // Fertile window (excluding ovulation day itself)
     for (var d = fertileStart;
         !d.isAfter(fertileEnd);
         d = d.add(const Duration(days: 1))) {
-      if (d != ovulation && !isCovered(d)) {
+      if (d != ovulation && !d.isBefore(today)) {
         setIfEmpty(d, DayRole.predictedFertile);
       }
     }
