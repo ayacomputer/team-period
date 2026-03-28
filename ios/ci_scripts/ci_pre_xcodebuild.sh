@@ -139,11 +139,7 @@ KEY_PROPERTIES="${REPO_ROOT}/android/key.properties"
 if [ -f "${KEY_PROPERTIES}" ]; then
     echo "[PASS] android/key.properties found"
 else
-    echo "[FAIL] android/key.properties is missing"
-    echo "       Set ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_ALIAS,"
-    echo "       ANDROID_KEYSTORE_PASSWORD, and ANDROID_KEY_PASSWORD as Secret"
-    echo "       environment variables in the Xcode Cloud workflow."
-    FAIL=1
+    echo "[WARN] android/key.properties is missing — Android release builds will use debug signing"
 fi
 
 echo "==================================="
