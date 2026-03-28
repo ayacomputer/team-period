@@ -1,6 +1,8 @@
+import 'dart:math';
 import '../models/cycle_settings.dart';
 import '../models/cycle_summary.dart';
 import '../models/period_log.dart';
+import '../models/temperature_entry.dart';
 
 /// All pure functions — no side effects, no Flutter dependencies.
 /// Dates are always normalised to midnight (start of day) to avoid
@@ -49,6 +51,22 @@ int computeAverageCycleLength(List<PeriodLog> logs, CycleSettings settings) {
 
   final sum = gaps.fold(0, (a, b) => a + b);
   return (sum / gaps.length).round();
+}
+
+/// Mean duration of completed period logs.
+/// Returns null if there are no completed logs.
+int? computeAveragePeriodLength(List<PeriodLog> logs) {
+  final completed = logs.where((l) => l.endDate != null).toList();
+  if (completed.isEmpty) return null;
+
+  final durations = completed.map((l) {
+    final start = fromIsoDate(l.startDate);
+    final end = fromIsoDate(l.endDate!);
+    return daysBetween(start, end) + 1; // inclusive
+  }).toList();
+
+  final sum = durations.fold(0, (a, b) => a + b);
+  return (sum / durations.length).round();
 }
 
 /// Computes the full [CycleSummary] for today.
@@ -132,4 +150,356 @@ CyclePhase _computePhase({
 int dayOfYear(DateTime date) {
   final start = DateTime(date.year, 1, 1);
   return date.difference(start).inDays + 1;
+}
+
+// ── Calendar helpers ───────────────────────────────────────────────────────
+
+/// The role a calendar day plays relative to logged / predicted cycle data.
+enum DayRole {
+  /// Falls within a completed period log (startDate..endDate).
+  actualPeriod,
+
+  /// Ongoing period with no endDate, up to today.
+  activePeriod,
+
+  /// Predicted future period window (dashed rose border).
+  predictedPeriod,
+
+  /// Predicted ovulation day (violet dot).
+  predictedOvulation,
+
+  /// Predicted fertile window (green tint).
+  predictedFertile,
+
+  /// No special role.
+  none,
+}
+
+/// Returns 35 or 42 [DateTime] values covering [month].
+/// The grid always starts on the Sunday of the week containing the 1st.
+List<DateTime> generateCalendarDays(DateTime month) {
+  final firstOfMonth = DateTime(month.year, month.month, 1);
+  // weekday: Mon=1 … Sun=7; we want Sunday=0 offset
+  final sundayOffset = firstOfMonth.weekday % 7;
+  final gridStart = firstOfMonth.subtract(Duration(days: sundayOffset));
+
+  // Use 35 cells unless the last day of the month falls in the 6th row.
+  final lastOfMonth = DateTime(month.year, month.month + 1, 0);
+  final lastSundayOffset = lastOfMonth.weekday % 7;
+  final lastCell = lastOfMonth.add(Duration(days: 6 - lastSundayOffset));
+  final totalDays = lastCell.difference(gridStart).inDays + 1;
+  final cellCount = totalDays > 35 ? 42 : 35;
+
+  return List.generate(cellCount, (i) => gridStart.add(Duration(days: i)));
+}
+
+/// Builds a map from each date within [monthStart]..[monthEnd] to its
+/// [DayRole]. Actual log data always takes priority over predictions.
+Map<DateTime, DayRole> buildDayRoleMap({
+  required List<PeriodLog> logs,
+  required CycleSettings settings,
+  required DateTime monthStart,
+  required DateTime monthEnd,
+  required DateTime today,
+}) {
+  final map = <DateTime, DayRole>{};
+
+  void setIfEmpty(DateTime day, DayRole role) {
+    final key = _startOfDay(day);
+    map[key] ??= DayRole.none;
+    if (map[key] == DayRole.none) map[key] = role;
+  }
+
+  // ── Step 1: mark actual / active logs ─────────────────────────────────
+
+  for (final log in logs) {
+    final start = fromIsoDate(log.startDate);
+    final end = log.endDate != null ? fromIsoDate(log.endDate!) : today;
+    final role = log.isActive ? DayRole.activePeriod : DayRole.actualPeriod;
+
+    for (var d = start;
+        !d.isAfter(end);
+        d = d.add(const Duration(days: 1))) {
+      final key = _startOfDay(d);
+      // Always overwrite with actual data.
+      map[key] = role;
+    }
+  }
+
+  // ── Step 2: predictions ───────────────────────────────────────────────
+
+  if (logs.isEmpty) return map;
+
+  final avgCycle = computeAverageCycleLength(logs, settings);
+  final avgPeriod =
+      computeAveragePeriodLength(logs) ?? settings.averagePeriodLength;
+
+  // Months that have at least one actual log — suppress predictions here.
+  final coveredMonths = <String>{};
+  for (final log in logs) {
+    final s = fromIsoDate(log.startDate);
+    coveredMonths.add('${s.year}-${s.month}');
+    if (log.endDate != null) {
+      final e = fromIsoDate(log.endDate!);
+      coveredMonths.add('${e.year}-${e.month}');
+    }
+  }
+
+  final sorted = [...logs]
+    ..sort((a, b) => b.startDate.compareTo(a.startDate));
+  var projected = fromIsoDate(sorted.first.startDate);
+
+  // Advance until projected start is after today (first future cycle).
+  while (!projected.isAfter(today)) {
+    projected = projected.add(Duration(days: avgCycle));
+  }
+
+  // Project forward until we've passed monthEnd.
+  while (!projected.isAfter(monthEnd)) {
+    final periodEnd =
+        projected.add(Duration(days: avgPeriod - 1));
+    final ovulation = projected.add(Duration(days: avgCycle - 14));
+    final fertileStart = ovulation.subtract(const Duration(days: 5));
+    final fertileEnd = ovulation.add(const Duration(days: 1));
+
+    // Only draw predictions in months with no real data.
+    bool isCovered(DateTime d) =>
+        coveredMonths.contains('${d.year}-${d.month}');
+
+    // Period window
+    for (var d = projected;
+        !d.isAfter(periodEnd);
+        d = d.add(const Duration(days: 1))) {
+      if (!isCovered(d)) setIfEmpty(d, DayRole.predictedPeriod);
+    }
+
+    // Ovulation day
+    if (!isCovered(ovulation)) {
+      setIfEmpty(ovulation, DayRole.predictedOvulation);
+    }
+
+    // Fertile window (excluding ovulation day itself)
+    for (var d = fertileStart;
+        !d.isAfter(fertileEnd);
+        d = d.add(const Duration(days: 1))) {
+      if (d != ovulation && !isCovered(d)) {
+        setIfEmpty(d, DayRole.predictedFertile);
+      }
+    }
+
+    projected = projected.add(Duration(days: avgCycle));
+  }
+
+  return map;
+}
+
+// ── Health insights ────────────────────────────────────────────────────────
+
+enum InsightSeverity { info, warning }
+
+class HealthInsight {
+  const HealthInsight({
+    required this.type,
+    required this.severity,
+    required this.message,
+  });
+
+  final String type;
+  final InsightSeverity severity;
+  final String message;
+}
+
+/// Analyses [logs], [settings], and [temperatures] and returns a list of
+/// relevant [HealthInsight] items. All checks are purely functional.
+List<HealthInsight> computeHealthInsights(
+  List<PeriodLog> logs,
+  CycleSettings settings,
+  List<TemperatureEntry> temperatures,
+) {
+  final insights = <HealthInsight>[];
+  final completed = logs.where((l) => l.endDate != null).toList();
+
+  // ── Not enough data ────────────────────────────────────────────────────
+  if (completed.length < 3) {
+    insights.add(const HealthInsight(
+      type: 'insufficient_data',
+      severity: InsightSeverity.info,
+      message:
+          'Log at least 3 complete cycles for personalised health insights.',
+    ));
+    return insights; // early return — most checks need 3+ cycles
+  }
+
+  // ── Cycle length stats ────────────────────────────────────────────────
+  final sorted = [...logs]
+    ..sort((a, b) => a.startDate.compareTo(b.startDate));
+
+  final cycleLengths = <int>[];
+  for (var i = 1; i < sorted.length; i++) {
+    final gap = daysBetween(
+      fromIsoDate(sorted[i - 1].startDate),
+      fromIsoDate(sorted[i].startDate),
+    );
+    if (gap > 0) cycleLengths.add(gap);
+  }
+
+  if (cycleLengths.isNotEmpty) {
+    final avgCycle = cycleLengths.fold(0, (a, b) => a + b) / cycleLengths.length;
+
+    if (avgCycle > 35) {
+      insights.add(HealthInsight(
+        type: 'long_cycle',
+        severity: InsightSeverity.warning,
+        message:
+            'Your average cycle is ${avgCycle.round()} days — longer than the typical range (21–35 days). Consider speaking with a healthcare provider.',
+      ));
+    } else if (avgCycle < 21) {
+      insights.add(HealthInsight(
+        type: 'short_cycle',
+        severity: InsightSeverity.warning,
+        message:
+            'Your average cycle is ${avgCycle.round()} days — shorter than the typical range (21–35 days). Consider speaking with a healthcare provider.',
+      ));
+    }
+
+    // Irregular cycles (std dev > 7 days)
+    final mean = avgCycle;
+    final variance = cycleLengths
+            .map((c) => pow(c - mean, 2))
+            .fold(0.0, (a, b) => a + b) /
+        cycleLengths.length;
+    final stdDev = sqrt(variance);
+
+    if (stdDev > 7) {
+      insights.add(HealthInsight(
+        type: 'irregular_cycles',
+        severity: InsightSeverity.info,
+        message:
+            'Your cycle lengths vary significantly (±${stdDev.round()} days), which may indicate hormonal irregularity.',
+      ));
+    }
+  }
+
+  // ── Period duration checks ────────────────────────────────────────────
+  for (final log in completed) {
+    final start = fromIsoDate(log.startDate);
+    final end = fromIsoDate(log.endDate!);
+    final duration = daysBetween(start, end) + 1;
+
+    if (duration > 8) {
+      insights.add(HealthInsight(
+        type: 'long_period',
+        severity: InsightSeverity.warning,
+        message:
+            'A period starting ${log.startDate} lasted $duration days, which is longer than usual (>8 days).',
+      ));
+    } else if (duration < 2) {
+      insights.add(HealthInsight(
+        type: 'very_short_period',
+        severity: InsightSeverity.info,
+        message:
+            'A period starting ${log.startDate} lasted only $duration day — shorter than typical.',
+      ));
+    }
+  }
+
+  // ── Cycle overdue ─────────────────────────────────────────────────────
+  final avgCycleLength = computeAverageCycleLength(logs, settings);
+  final recentLog = (sorted..sort((a, b) => b.startDate.compareTo(a.startDate))).first;
+  final lastStart = fromIsoDate(recentLog.startDate);
+  final today = _startOfDay(DateTime.now());
+  final daysSinceLast = daysBetween(lastStart, today);
+
+  if (recentLog.isActive == false && daysSinceLast > avgCycleLength + 7) {
+    insights.add(HealthInsight(
+      type: 'cycle_overdue',
+      severity: InsightSeverity.warning,
+      message:
+          'Your period is ${daysSinceLast - avgCycleLength} days overdue. If this is unexpected, consider taking a pregnancy test or consulting a doctor.',
+    ));
+  }
+
+  // ── BBT checks ────────────────────────────────────────────────────────
+  if (temperatures.isNotEmpty) {
+    final recentTemps = temperatures
+        .where((t) {
+          final d = fromIsoDate(t.dateOnly);
+          return daysBetween(d, today) <= 18;
+        })
+        .toList()
+      ..sort((a, b) => a.datetime.compareTo(b.datetime));
+
+    // BBT consistently elevated (all readings in last 18 days > 37.5°C)
+    if (recentTemps.length >= 3 &&
+        recentTemps.every((t) => t.celsius > 37.5)) {
+      insights.add(const HealthInsight(
+        type: 'bbt_consistently_elevated',
+        severity: InsightSeverity.warning,
+        message:
+            'All temperature readings over the last 18 days are above 37.5°C. This may indicate illness or hormonal changes — seek medical advice if persistent.',
+      ));
+    }
+
+    // No post-ovulation BBT rise
+    final summary = computeCycleSummary(logs, settings);
+    final ovulationDate = summary.ovulationDate;
+    final postOvTemps = temperatures
+        .where((t) {
+          final d = fromIsoDate(t.dateOnly);
+          return !d.isBefore(ovulationDate) &&
+              daysBetween(ovulationDate, d) <= 10;
+        })
+        .toList()
+      ..sort((a, b) => a.datetime.compareTo(b.datetime));
+
+    if (postOvTemps.length >= 3) {
+      // Check for a sustained rise of ≥ 0.2°C over 3 consecutive readings
+      final baselineTemp = temperatures
+          .where((t) {
+            final d = fromIsoDate(t.dateOnly);
+            return d.isBefore(ovulationDate);
+          })
+          .map((t) => t.celsius)
+          .fold<double>(0.0, (a, b) => a + b);
+
+      final beforeOvCount = temperatures
+          .where((t) => fromIsoDate(t.dateOnly).isBefore(ovulationDate))
+          .length;
+
+      if (beforeOvCount > 0) {
+        final baseline = baselineTemp / beforeOvCount;
+        final hasRise = _hasSustainedRise(postOvTemps, baseline, 0.2, 3);
+        if (!hasRise) {
+          insights.add(const HealthInsight(
+            type: 'bbt_no_post_ovulation_rise',
+            severity: InsightSeverity.info,
+            message:
+                'No clear temperature rise detected after predicted ovulation. BBT should rise ≥0.2°C and stay elevated for 3+ days after ovulation.',
+          ));
+        }
+      }
+    }
+  }
+
+  return insights;
+}
+
+/// Returns true if [temps] contains a run of at least [minDays] consecutive
+/// readings that are all at least [riseThreshold] above [baseline].
+bool _hasSustainedRise(
+  List<TemperatureEntry> temps,
+  double baseline,
+  double riseThreshold,
+  int minDays,
+) {
+  var streak = 0;
+  for (final t in temps) {
+    if (t.celsius >= baseline + riseThreshold) {
+      streak++;
+      if (streak >= minDays) return true;
+    } else {
+      streak = 0;
+    }
+  }
+  return false;
 }

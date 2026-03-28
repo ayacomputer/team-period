@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import '../l10n/app_localizations.dart';
+import '../models/flow_entry.dart';
 import '../models/mood_entry.dart';
 import '../models/period_log.dart';
+import '../utils/cycle_calculations.dart';
 import '../utils/phase_theme.dart';
 import '../models/cycle_summary.dart';
 
-/// Mood selector + condition chips shown while a period is active.
+/// Period start/end buttons, mood logger, and flow intensity logger.
+///
+/// Flow and mood logging panels are only visible while a period is active.
 class PeriodLoggerCard extends StatefulWidget {
   const PeriodLoggerCard({
     super.key,
@@ -13,12 +18,14 @@ class PeriodLoggerCard extends StatefulWidget {
     required this.onPeriodStart,
     required this.onPeriodEnd,
     required this.onMoodSaved,
+    required this.onFlowSaved,
   });
 
   final PeriodLog? activePeriod;
   final VoidCallback onPeriodStart;
   final VoidCallback onPeriodEnd;
   final void Function(MoodEntry entry) onMoodSaved;
+  final void Function(FlowEntry entry) onFlowSaved;
 
   @override
   State<PeriodLoggerCard> createState() => _PeriodLoggerCardState();
@@ -29,12 +36,15 @@ class _PeriodLoggerCardState extends State<PeriodLoggerCard> {
   final Set<String> _selectedConditions = {};
   final _noteController = TextEditingController();
   bool _showMoodLogger = false;
+  bool _showFlowLogger = false;
 
   @override
   void dispose() {
     _noteController.dispose();
     super.dispose();
   }
+
+  String _todayIso() => toIsoDate(DateTime.now());
 
   void _saveMood() {
     if (_selectedMood == null) return;
@@ -55,25 +65,46 @@ class _PeriodLoggerCardState extends State<PeriodLoggerCard> {
     });
   }
 
-  String _todayIso() {
-    final now = DateTime.now();
-    return '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+  void _saveFlow(FlowIntensity intensity) {
+    widget.onFlowSaved(FlowEntry(date: _todayIso(), intensity: intensity));
+    setState(() => _showFlowLogger = false);
+  }
+
+  MoodEntry? _todayMoodEntry() {
+    if (widget.activePeriod == null) return null;
+    final today = _todayIso();
+    try {
+      return widget.activePeriod!.moods.firstWhere((m) => m.date == today);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  FlowEntry? _todayFlowEntry() {
+    if (widget.activePeriod == null) return null;
+    final today = _todayIso();
+    try {
+      return widget.activePeriod!.flows.firstWhere((f) => f.date == today);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
     final isActive = widget.activePeriod != null;
-    final roseLight = PhaseTheme.lightColor(CyclePhase.period);
     final rose = PhaseTheme.primaryColor(CyclePhase.period);
+    final roseLight = PhaseTheme.lightColor(CyclePhase.period);
 
     return Column(
       children: [
-        // Action buttons row
+        // Start / End buttons
         Row(
           children: [
             Expanded(
               child: _ActionButton(
-                label: 'Period Started',
+                label: t.periodStarted,
                 icon: FontAwesomeIcons.droplet,
                 color: rose,
                 light: roseLight,
@@ -84,39 +115,73 @@ class _PeriodLoggerCardState extends State<PeriodLoggerCard> {
             const SizedBox(width: 12),
             Expanded(
               child: _ActionButton(
-                label: 'Period Ended',
+                label: t.periodEnded,
                 icon: FontAwesomeIcons.circleCheck,
                 color: const Color(0xFF16A34A),
                 light: const Color(0xFFF0FDF4),
                 enabled: isActive,
                 onTap: () {
                   widget.onPeriodEnd();
-                  setState(() => _showMoodLogger = false);
+                  setState(() {
+                    _showMoodLogger = false;
+                    _showFlowLogger = false;
+                  });
                 },
               ),
             ),
           ],
         ),
 
-        // Log today's mood button — only while period is active
+        // Mood + flow logger buttons — only while active
         if (isActive) ...[
           const SizedBox(height: 12),
-          OutlinedButton.icon(
-            icon: const FaIcon(FontAwesomeIcons.faceSmile, size: 16),
-            label: Text(
-              _todayMoodEntry() != null
-                  ? 'Update today\'s mood'
-                  : 'Log today\'s mood',
-            ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: rose,
-              side: BorderSide(color: rose.withValues(alpha: 0.5)),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const FaIcon(FontAwesomeIcons.faceSmile, size: 15),
+                  label: Text(
+                    _todayMoodEntry() != null ? t.logMood : t.logMood,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: rose,
+                    side: BorderSide(color: rose.withValues(alpha: 0.5)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onPressed: () => setState(() {
+                    _showMoodLogger = !_showMoodLogger;
+                    _showFlowLogger = false;
+                  }),
+                ),
               ),
-              minimumSize: const Size.fromHeight(44),
-            ),
-            onPressed: () => setState(() => _showMoodLogger = !_showMoodLogger),
+              const SizedBox(width: 8),
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const FaIcon(FontAwesomeIcons.droplet, size: 15),
+                  label: Text(
+                    t.logFlow,
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF7C3AED),
+                    side: const BorderSide(
+                        color: Color(0xFF7C3AED), width: 0.5),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onPressed: () => setState(() {
+                    _showFlowLogger = !_showFlowLogger;
+                    _showMoodLogger = false;
+                  }),
+                ),
+              ),
+            ],
           ),
         ],
 
@@ -136,24 +201,126 @@ class _PeriodLoggerCardState extends State<PeriodLoggerCard> {
               }
             }),
             onSave: _selectedMood != null ? _saveMood : null,
+            t: t,
+          ),
+        ],
+
+        // Flow logger panel
+        if (_showFlowLogger) ...[
+          const SizedBox(height: 16),
+          _FlowLoggerPanel(
+            currentEntry: _todayFlowEntry(),
+            onSave: _saveFlow,
+            t: t,
           ),
         ],
       ],
     );
   }
+}
 
-  MoodEntry? _todayMoodEntry() {
-    if (widget.activePeriod == null) return null;
-    final today = _todayIso();
-    try {
-      return widget.activePeriod!.moods.firstWhere((m) => m.date == today);
-    } catch (_) {
-      return null;
-    }
+// ── Flow logger panel ─────────────────────────────────────────────────────────
+
+class _FlowLoggerPanel extends StatelessWidget {
+  const _FlowLoggerPanel({
+    required this.currentEntry,
+    required this.onSave,
+    required this.t,
+  });
+
+  final FlowEntry? currentEntry;
+  final void Function(FlowIntensity) onSave;
+  final AppLocalizations t;
+
+  static const _options = [
+    (FlowIntensity.spotting, '💧'),
+    (FlowIntensity.light, '🩸'),
+    (FlowIntensity.medium, '🩸🩸'),
+    (FlowIntensity.heavy, '🩸🩸🩸'),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            t.logFlow,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: _options.map((opt) {
+              final (intensity, emoji) = opt;
+              final label = _intensityLabel(intensity, t);
+              final selected = currentEntry?.intensity == intensity;
+              const violet = Color(0xFF7C3AED);
+
+              return Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 3),
+                  child: GestureDetector(
+                    onTap: () => onSave(intensity),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? violet.withValues(alpha: 0.12)
+                            : Colors.grey.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: selected ? violet : Colors.grey.shade200,
+                          width: selected ? 1.5 : 1,
+                        ),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(emoji,
+                              style: const TextStyle(fontSize: 18)),
+                          const SizedBox(height: 4),
+                          Text(
+                            label,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: selected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                              color: selected ? violet : Colors.grey.shade600,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _intensityLabel(FlowIntensity intensity, AppLocalizations t) {
+    return switch (intensity) {
+      FlowIntensity.spotting => t.flowSpotting,
+      FlowIntensity.light => t.flowLight,
+      FlowIntensity.medium => t.flowMedium,
+      FlowIntensity.heavy => t.flowHeavy,
+    };
   }
 }
 
-// ── Sub-widgets ───────────────────────────────────────────────────────────────
+// ── Action buttons ────────────────────────────────────────────────────────────
 
 class _ActionButton extends StatelessWidget {
   const _ActionButton({
@@ -215,6 +382,8 @@ class _ActionButton extends StatelessWidget {
   }
 }
 
+// ── Mood logger panel ─────────────────────────────────────────────────────────
+
 class _MoodLoggerPanel extends StatelessWidget {
   const _MoodLoggerPanel({
     required this.initialMood,
@@ -223,6 +392,7 @@ class _MoodLoggerPanel extends StatelessWidget {
     required this.onMoodSelected,
     required this.onConditionToggled,
     required this.onSave,
+    required this.t,
   });
 
   final Mood? initialMood;
@@ -231,17 +401,18 @@ class _MoodLoggerPanel extends StatelessWidget {
   final void Function(Mood) onMoodSelected;
   final void Function(String) onConditionToggled;
   final VoidCallback? onSave;
-
-  static const _moods = [
-    (Mood.great, FontAwesomeIcons.faceGrinStars, 'Great'),
-    (Mood.good, FontAwesomeIcons.faceSmile, 'Good'),
-    (Mood.okay, FontAwesomeIcons.faceMeh, 'Okay'),
-    (Mood.low, FontAwesomeIcons.faceFrown, 'Low'),
-    (Mood.rough, FontAwesomeIcons.faceSadTear, 'Rough'),
-  ];
+  final AppLocalizations t;
 
   @override
   Widget build(BuildContext context) {
+    final moods = [
+      (Mood.great, FontAwesomeIcons.faceGrinStars, t.moodGreat),
+      (Mood.good, FontAwesomeIcons.faceSmile, t.moodGood),
+      (Mood.okay, FontAwesomeIcons.faceMeh, t.moodOkay),
+      (Mood.low, FontAwesomeIcons.faceFrown, t.moodLow),
+      (Mood.rough, FontAwesomeIcons.faceSadTear, t.moodRough),
+    ];
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -252,16 +423,16 @@ class _MoodLoggerPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'How are you feeling?',
-            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+          Text(
+            t.logMood,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
           ),
           const SizedBox(height: 12),
 
           // Mood row
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: _moods.map((m) {
+            children: moods.map((m) {
               final (mood, icon, label) = m;
               final selected = initialMood == mood;
               return GestureDetector(
@@ -335,8 +506,8 @@ class _MoodLoggerPanel extends StatelessWidget {
                       ? PhaseTheme.primaryColor(CyclePhase.period)
                       : Colors.grey.shade700,
                 ),
-                selectedColor:
-                    PhaseTheme.accentColor(CyclePhase.period).withValues(alpha: 0.4),
+                selectedColor: PhaseTheme.accentColor(CyclePhase.period)
+                    .withValues(alpha: 0.4),
                 checkmarkColor: PhaseTheme.primaryColor(CyclePhase.period),
                 side: BorderSide(
                   color: selected
@@ -375,11 +546,10 @@ class _MoodLoggerPanel extends StatelessWidget {
             width: double.infinity,
             child: FilledButton.icon(
               icon: const FaIcon(FontAwesomeIcons.floppyDisk, size: 14),
-              label: const Text('Save mood'),
+              label: Text(t.saveButton),
               onPressed: onSave,
               style: FilledButton.styleFrom(
-                backgroundColor:
-                    PhaseTheme.primaryColor(CyclePhase.period),
+                backgroundColor: PhaseTheme.primaryColor(CyclePhase.period),
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),

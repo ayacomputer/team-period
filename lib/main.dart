@@ -2,7 +2,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'firebase_options.dart';
-import 'screens/home_screen.dart';
+import 'l10n/app_localizations.dart';
+import 'screens/main_shell.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,7 +40,14 @@ class App extends StatelessWidget {
       title: 'teamPeriod',
       debugShowCheckedModeBanner: false,
       theme: _buildTheme(),
-      home: const HomeScreen(),
+      home: const MainShell(),
+      // Locale support — English and Japanese.
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+      ],
+      supportedLocales: AppLocalizations.supportedLocales,
+      // Locale is driven by CycleSettings.languageCode; the MainShell passes it
+      // down by wrapping children in a Localizations.override widget.
     );
   }
 

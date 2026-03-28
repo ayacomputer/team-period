@@ -1,3 +1,4 @@
+import 'flow_entry.dart';
 import 'mood_entry.dart';
 
 class PeriodLog {
@@ -6,6 +7,7 @@ class PeriodLog {
     required this.startDate,
     this.endDate,
     this.moods = const [],
+    this.flows = const [],
   });
 
   final String id;
@@ -18,6 +20,9 @@ class PeriodLog {
 
   final List<MoodEntry> moods;
 
+  /// One [FlowEntry] per day during the period — optional, logged by user.
+  final List<FlowEntry> flows;
+
   bool get isActive => endDate == null;
 
   PeriodLog copyWith({
@@ -26,12 +31,14 @@ class PeriodLog {
     String? endDate,
     bool clearEndDate = false,
     List<MoodEntry>? moods,
+    List<FlowEntry>? flows,
   }) {
     return PeriodLog(
       id: id ?? this.id,
       startDate: startDate ?? this.startDate,
       endDate: clearEndDate ? null : (endDate ?? this.endDate),
       moods: moods ?? this.moods,
+      flows: flows ?? this.flows,
     );
   }
 
@@ -40,6 +47,7 @@ class PeriodLog {
         'startDate': startDate,
         if (endDate != null) 'endDate': endDate,
         'moods': moods.map((m) => m.toJson()).toList(),
+        'flows': flows.map((f) => f.toJson()).toList(),
       };
 
   factory PeriodLog.fromJson(Map<String, dynamic> json) {
@@ -49,6 +57,9 @@ class PeriodLog {
       endDate: json['endDate'] as String?,
       moods: (json['moods'] as List? ?? [])
           .map((m) => MoodEntry.fromJson(m as Map<String, dynamic>))
+          .toList(),
+      flows: (json['flows'] as List? ?? [])
+          .map((f) => FlowEntry.fromJson(f as Map<String, dynamic>))
           .toList(),
     );
   }
